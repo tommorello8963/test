@@ -1,5 +1,5 @@
-import { Link, useNavigate, useRouter } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { Link, useRouter } from '@tanstack/react-router'
+import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 
@@ -17,19 +17,20 @@ import { toast } from 'sonner'
 
 import { Text } from '@lms/ui/components/text'
 
+import { DataTable } from '@lms/ui/components/data-table'
 import { PageLayout } from '@lms/ui/shared/layout/PageLayout'
 import { usePagination } from '@lms/ui/hooks/use-pagination'
 import { PaginatedDataTable } from '@lms/ui/shared/PaginatedDataTable'
 import { CheckCircle, FileText, TriangleAlert } from 'lucide-react'
 import { CsvStataticsCard } from '../CsvStaticsCard'
 import type { ColumnDef } from '@lms/ui/components/data-table'
+import type { UserCsvImportApiResponseT } from '@lms/core/schemas/user/user.schema'
 import type { UserCSVDataSchema } from '@/features/user/model/user.csv.schema.ts'
 import { zUserCSVDataSchema } from '@/features/user/model/user.csv.schema.ts'
 import { PreviewTableRow } from '@/features/user/ui/PreviewTableRow.tsx'
 import { BREADCRUMBS } from '@/constants/breadcrumb'
 import { getPageData } from '@/shared/utils/helpers'
 import { useImportUsersCsvMutation } from '@/features/user/api/user.mutations.ts'
-import { showImportResultToast } from '@/shared/utils/csv-import.helpers.ts'
 
 interface PreviewDataTableRow extends UserCSVDataSchema {
   id?: string
@@ -40,14 +41,10 @@ export function CsvImportForm() {
   const form = useForm()
   const { watch } = form
   const csvData = watch('csv', { data: [], file: null })
-  const navigate = useNavigate()
   const router = useRouter()
   const columnHelpers = createColumnHelper<UserCSVDataSchema>()
-  const { mutateAsync: importUsers, isPending } = useImportUsersCsvMutation({
-    onError: (error) => {
-      toast.error(error.message)
-    },
-  })
+  const [results, setResults] = useState<UserCsvImportApiResponseT | null>(null)
+  const { mutateAsync: importUsers, isPending } = useImportUsersCsvMutation()
 
   const { page, pageSize, setPage } = usePagination()
 
@@ -114,18 +111,17 @@ export function CsvImportForm() {
     [],
   )
 
-  const handleSubmit = async () => {
-    if (!csvData?.file) {
-      toast.error('CSVファイルを選択してください。')
-      return
-    }
-
-    const result = await importUsers({ file: csvData.file })
-
-    if (showImportResultToast(result, toast)) {
-      void navigate({
-        to: '/user/list',
+  const handleSubmit = async (formData: any) => {
+    try {
+      const response = await importUsers({
+        file: formData.csv.file,
       })
+
+      form.reset()
+      setResults(response)
+      toast.success('CSVのインポートが完了しました。')
+    } catch (error: any) {
+      toast.error(error?.message ?? 'CSVのインポートに失敗しました。')
     }
   }
   const handleCancel = () => {
@@ -172,6 +168,12 @@ export function CsvImportForm() {
   const validCount = handleCsvDataValidation().filter(
     (row) => !Object.hasOwn(row, 'errors'),
   ).length
+
+  useEffect(() => {
+    if (csvData.file) {
+      setResults(null)
+    }
+  }, [csvData?.file])
 
   const validatedData = handleCsvDataValidation()
 
@@ -222,8 +224,56 @@ export function CsvImportForm() {
               name="csv"
               tranformHeader={mapCSVHeader}
             />
+            {results && (
+              <Text variant="smallBold">
+                CSVアップロード完了：合計{results.total}件、成功
+                {results.success}件、スキップ{results.skipped}件、失敗
+                {results.failed}件
+              </Text>
+            )}
           </FormSection>
         </Form>
+
+        {results && (
+          <section className="overflow-x-hidden mt-2">
+            <Card className="p-5">
+              <Text color="secondary">CSV Results</Text>
+              <DataTable
+                data={results.results}
+                columns={[
+                  {
+                    accessorKey: 'row',
+                    header: '行',
+                    cell: ({ getValue }) => (
+                      <Text className="text-center">{getValue<string>()}</Text>
+                    ),
+                  },
+                  {
+                    accessorKey: 'email',
+                    header: 'メールアドレス',
+                    cell: ({ getValue }) => (
+                      <Text className="text-center">{getValue<string>()}</Text>
+                    ),
+                  },
+                  {
+                    accessorKey: 'message',
+                    header: 'メッセージ',
+                    cell: ({ getValue }) => (
+                      <Text className="text-center">{getValue<string>()}</Text>
+                    ),
+                  },
+                  {
+                    accessorKey: 'status',
+                    header: '状態',
+                    cell: ({ getValue }) => (
+                      <Text className="text-center">{getValue<string>()}</Text>
+                    ),
+                  },
+                ]}
+              />
+            </Card>
+          </section>
+        )}
 
         <section className="overflow-x-hidden mt-2">
           {csvData?.data?.length > 0 && (
